@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Pyodide Bioinformatics Demo</title>
+
+  <!-- Load Pyodide from the official CDN -->
+  <script src="https://cdn.jsdelivr.net/pyodide/v0.29.0/full/pyodide.js"></script>
+
+  <style>
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      max-width: 800px;
+      margin: 2rem auto;
+      padding: 0 1rem;
+      line-height: 1.5;
+    }
+    textarea {
+      width: 100%;
+      box-sizing: border-box;
+      font-family: monospace;
+    }
+    button {
+      margin-top: 0.75rem;
+      padding: 0.5rem 1rem;
+      font-size: 1rem;
+      cursor: pointer;
+    }
+    pre {
+      background: #f5f5f5;
+      padding: 0.75rem;
+      overflow-x: auto;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .status {
+      font-size: 0.9rem;
+      color: #555;
+      margin-top: 0.25rem;
+    }
+  </style>
+</head>
+<body>
+  <h1>Pyodide Bioinformatics Demo</h1>
+  <p>
+    This page runs Python in your browser with Pyodide to do simple DNA sequence analysis:
+    it computes GC content and the reverse complement.
+  </p>
+
+  <label for="sequence"><strong>DNA sequence (A/C/G/T):</strong></label><br />
+  <textarea id="sequence" rows="6">
+>Example sequence (you can paste FASTA or raw sequence)
+ATGGCCATTGTAATGGGCCGCTGAAAGGGTGCCCGATAG
+  </textarea>
+
+  <div class="status" id="status">Loading Pyodide…</div>
+
+  <button id="analyzeButton" disabled>Analyze sequence</button>
+
+  <h2>Results</h2>
+  <pre id="output">(waiting for input)</pre>
+
+  <script type="text/javascript">
+    // Load Pyodide once, globally
+    let pyodideReadyPromise = loadPyodide();
+    
+    const statusEl = document.getElementById("status");
+    const outputEl = document.getElementById("output");
+    const analyzeButton = document.getElementById("analyzeButton");
+
+    async function setupPyodide() {
+      try {
+        const pyodide = await pyodideReadyPromise;
+        const packages = [] // Optionally add packages
+        
+        if (packages.length > 0) {
+          await pyodide.loadPackage("micropip");
+          const micropip = pyodide.pyimport("micropip");
+        
+          await Promise.all(
+            packages.map(pkg => micropip.install(pkg))
+          );
+        }
+        // Define analysis code once in the Python environment
+        pyodide.runPython(`
+from textwrap import wrap
+
+def gc_content(seq: str):
+    seq = seq.upper()
+    gc = sum(1 for b in seq if b in "GC")
+    at = sum(1 for b in seq if b in "AT")
+    others = len(seq) - gc - at
+    length = len(seq)
+    if length == 0:
+        return 0.0, gc, at, others, length
+    return gc / length * 100.0, gc, at, others, length
+
+def reverse_complement(seq: str) -> str:
+    comp = str.maketrans("ACGTacgt", "TGCAtgca")
+    return seq.translate(comp)[::-1]
+
+def analyze_sequence(raw_seq: str) -> str:
+    # Strip FASTA header if present
+    lines = raw_seq.strip().splitlines()
+    seq_only_lines = [ln for ln in lines if not ln.startswith(">")]
+    seq = "".join(seq_only_lines).replace(" ", "").upper()
+
+    # Keep only A/C/G/T
+    cleaned = "".join(b for b in seq if b in "ACGT")
+
+    gc_pct, gc, at, others, length = gc_content(cleaned)
+    revcomp = reverse_complement(cleaned)
+
+    lines_out = []
+    lines_out.append(f"Original length (including non-ACGT): {len(seq)}")
+    lines_out.append(f"Cleaned length (ACGT only): {length}")
+    lines_out.append(f"GC bases: {gc}")
+    lines_out.append(f"AT bases: {at}")
+    lines_out.append(f"Other discarded characters: {others}")
+    lines_out.append(f"GC content: {gc_pct:.2f}%")
+    lines_out.append("")
+    lines_out.append("Reverse complement:")
+    # Wrap reverse complement to 60 characters per line, FASTA-style
+    if revcomp:
+        lines_out.extend(wrap(revcomp, 60))
+    else:
+        lines_out.append("(empty sequence)")
+    return "\\n".join(lines_out)
+        `);
+
+        statusEl.textContent = "Pyodide ready.";
+        analyzeButton.disabled = false;
+      } catch (err) {
+        console.error(err);
+        statusEl.textContent = "Error loading Pyodide. See console for details.";
+      }
+    }
+
+    setupPyodide();
+
+    async function analyze() {
+      analyzeButton.disabled = true;
+      statusEl.textContent = "Running analysis…";
+
+      try {
+        const pyodide = await pyodideReadyPromise;
+        const seq = document.getElementById("sequence").value;
+
+        // Pass the JS string into the Python environment safely
+        pyodide.globals.set("raw_seq_js", seq);
+
+        const result = pyodide.runPython(`
+# 'raw_seq_js' is injected from JavaScript
+analyze_sequence(raw_seq_js)
+        `);
+
+        outputEl.textContent = result;
+        statusEl.textContent = "Done.";
+      } catch (err) {
+        console.error(err);
+        outputEl.textContent = "Error during analysis:\\n" + err;
+        statusEl.textContent = "Error.";
+      } finally {
+        analyzeButton.disabled = false;
+      }
+    }
+
+    analyzeButton.addEventListener("click", analyze);
+  </script>
+</body>
+</html>
