@@ -147,11 +147,11 @@
     }
 
     async function installDependencies(pyodide) {
-      statusEl.textContent = "Installing micropip + Biopython + pycirclize + loguru (may take 10–60s)...";
+      statusEl.textContent = "Installing micropip + Biopython + pycirclize (may take 10–60s)...";
       log("Installing micropip and packages. This can take a while on first run.");
       await pyodide.loadPackage("micropip");
       const micropip = pyodide.pyimport("micropip");
-      const packages = ["biopython", "pycirclize", "loguru"];
+      const packages = ["biopython", "pycirclize"];
       for (const pkg of packages) {
         log(`Installing ${pkg} ...`);
         try {
