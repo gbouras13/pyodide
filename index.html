@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>Pyodide phold_plots (browser)</title>
+  <title>phold_plots — Pyodide (patched)</title>
 
   <!-- Pyodide -->
   <script src="https://cdn.jsdelivr.net/pyodide/v0.29.0/full/pyodide.js"></script>
@@ -134,16 +134,11 @@
     }
 
     async function installDependencies(pyodide) {
-      // Install micropip then required Python packages
-      statusEl.textContent = "Installing micropip + Biopython + pycirclize + loguru (may take 10-60s)...";
+      statusEl.textContent = "Installing micropip + Biopython + pycirclize + loguru (may take 10–60s)...";
       log("Installing micropip and packages. This can take a while on first run.");
-
-      // Use runPythonAsync to show progress messages from Python side
       await pyodide.loadPackage("micropip");
       const micropip = pyodide.pyimport("micropip");
-      // The package list below can be adjusted if you prefer to omit loguru
       const packages = ["biopython", "pycirclize", "loguru"];
-
       for (const pkg of packages) {
         log(`Installing ${pkg} ...`);
         try {
@@ -151,16 +146,13 @@
           log(`Installed ${pkg}`);
         } catch (err) {
           log(`Error installing ${pkg}: ${err}`);
-          // try continue — pycirclize often needs matplotlib/numpy which are pre-provided
         }
       }
-      statusEl.textContent = "Dependencies installed.";
-      log("All requested packages attempted.");
+      statusEl.textContent = "Dependencies installed (or attempted).";
+      log("Package installation step complete.");
     }
 
-    // Main button handler
     runBtn.addEventListener("click", async () => {
-      // Read UI values
       const file = fileInput.files[0];
       if (!file) {
         alert("Please select a GenBank file first.");
@@ -188,86 +180,124 @@
         labelIds: (document.getElementById("labelIds").value || "").split(/\r?\n/).map(s => s.trim()).filter(Boolean)
       };
 
-      // load pyodide & install deps
       const pyodide = await ensurePyodide();
       await installDependencies(pyodide);
 
-      // Read the uploaded file as text
       const fileText = await file.text();
-
-      // Pass file and options into Python and run the plotting function
       statusEl.textContent = "Running plotting in Pyodide (this may take a while)...";
       log("Starting Python plotting...");
 
       try {
-        // Set JS variables in Python
         pyodide.globals.set("uploaded_text_js", fileText);
         pyodide.globals.set("opts_js", opts);
 
-        // Run the heavy Python logic asynchronously and get back a dictionary
         const result = await pyodide.runPythonAsync(`
-# --- Python code executed inside Pyodide ---
+# --- Python (runs inside Pyodide) ---
 import os
-from io import BytesIO, StringIO
 from pathlib import Path
+from io import BytesIO
 import json
-# ensure the options passed as a JS object are available
+
 opts = opts_js.to_py()
 
-# write uploaded text to a temporary file in the WASM filesystem
+# write uploaded GBK
 tmp_dir = Path("/tmp/pyodide_phold")
 tmp_dir.mkdir(parents=True, exist_ok=True)
 gbk_path = tmp_dir / "upload.gbk"
 with open(gbk_path, "w", encoding="utf-8") as fh:
     fh.write(uploaded_text_js)
 
-# Import required packages
-import micropip
-# (micropip already installed previously)
-# Now import plotting libs
+# imports
 import numpy as np
 import matplotlib
-matplotlib.use("Agg")  # non-interactive backend for headless render
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-# Import Biopython + pycirclize
 from Bio import SeqIO
+from Bio.Seq import Seq
+from Bio.SeqFeature import SeqFeature
 from pycirclize import Circos
-from pycirclize.parser import Genbank
 
-# Read the GenBank file using pycirclize Genbank parser
-gbk = Genbank(str(gbk_path))
+# parse records with Biopython (robust across pyodide Biopython)
+records = list(SeqIO.parse(str(gbk_path), "genbank"))
+if len(records) == 0:
+    raise RuntimeError("No GenBank records found in uploaded file.")
 
-# Prepare mapping: seqid -> size, features etc
-seqid2size = gbk.get_seqid2size()
+# Build lookups
+rec_by_id = {rec.id: rec for rec in records}
+# fallback: also map by name and by locus_tag if available
+for rec in records:
+    if rec.name not in rec_by_id:
+        rec_by_id.setdefault(rec.name, rec)
+
+seqid2size = {rid: len(rec.seq) for rid, rec in rec_by_id.items()}
 seqids = list(seqid2size.keys())
 
-# Helper: the adapted create_circos_plot using the same logic as your function (trimmed to essentials)
+# simple gc and gc-skew calculators using sliding window
+def sliding_gc(seq, window=100):
+    s = str(seq).upper()
+    n = len(s)
+    if n == 0:
+        return [], np.array([])
+    half = window // 2
+    positions = []
+    values = []
+    # pad sequence edges by repeating ends for consistent windowing
+    padded = s
+    for i in range(n):
+        start = max(0, i - half)
+        end = min(n, i + half)
+        subseq = padded[start:end]
+        gc = subseq.count("G") + subseq.count("C")
+        if len(subseq) > 0:
+            values.append((gc / len(subseq)) * 100.0)
+            positions.append(i + 1)  # 1-based coordinate
+    return positions, np.array(values)
+
+def sliding_gc_skew(seq, window=100):
+    s = str(seq).upper()
+    n = len(s)
+    if n == 0:
+        return [], np.array([])
+    half = window // 2
+    positions = []
+    values = []
+    for i in range(n):
+        start = max(0, i - half)
+        end = min(n, i + half)
+        subseq = s[start:end]
+        g = subseq.count("G")
+        c = subseq.count("C")
+        denom = g + c
+        skew = (g - c) / denom if denom > 0 else 0.0
+        values.append(skew)
+        positions.append(i + 1)
+    return positions, np.array(values)
+
+# create and return png/svg bytes for each plotted contig
 def create_one_plot(contig_id):
     seq_len = seqid2size[contig_id]
     circos = Circos(sectors={contig_id: seq_len})
-    # title
     title_to_use = opts.get("plotTitle") or contig_id
     circos.text(title_to_use, size=int(opts.get("titleSize",20)), r=190)
     sector = circos.get_sector(contig_id)
-
     cds_track = sector.add_track((70,80))
     cds_track.axis(fc="#EEEEEE", ec="none")
 
-    # collect features from gbk
-    gb_features = gbk.get_seqid2features(feature_type=None)  # all features
-    features = gb_features.get(contig_id, [])
+    # get features from Biopython record
+    rec = rec_by_id[contig_id]
+    features = rec.features
 
-    # classify forward/rev
     fwd = [f for f in features if getattr(f.location, "strand", 1) == 1]
     rev = [f for f in features if getattr(f.location, "strand", 1) == -1]
     cds_features = [f for f in features if f.type == "CDS"]
-    trna_features = [f for f in features if f.type in ("tRNA",)]
+    trna_features = [f for f in features if f.type == "tRNA"]
     tmrna_features = [f for f in features if f.type in ("tmRNA","tm-RNA","tmRNA")]
     crispr_features = [f for f in features if f.type in ("repeat_region","CRISPR")]
 
-    # Minimal colour mapping similar to your original data_dict
+    # basic data_dict as before
     data_dict = {
+        "acr_defense_vfdb_card": {"col": "#FF0000", "fwd_list": [], "rev_list": []},
         "unk": {"col": "#AAAAAA", "fwd_list": [], "rev_list": []},
         "other": {"col": "#4deeea", "fwd_list": [], "rev_list": []},
         "tail": {"col": "#74ee15", "fwd_list": [], "rev_list": []},
@@ -278,10 +308,8 @@ def create_one_plot(contig_id):
         "int": {"col": "#E0B0FF", "fwd_list": [], "rev_list": []},
         "head": {"col": "#ff008d", "fwd_list": [], "rev_list": []},
         "con": {"col": "#5A5A5A", "fwd_list": [], "rev_list": []},
-        "acr_defense_vfdb_card": {"col":"#FF0000","fwd_list":[],"rev_list":[]}
     }
 
-    # Simple classifier (fallbacks) — try to use feature.qualifiers safely
     def qval(feat, key, idx=0):
         try:
             return feat.qualifiers.get(key, [""])[idx]
@@ -295,7 +323,6 @@ def create_one_plot(contig_id):
             if any(x in phrog for x in ("vfdb","card","acr","defensefinder")):
                 data_dict["acr_defense_vfdb_card"]["fwd_list"].append(feat)
             else:
-                # fallback mapping using function string
                 if func.startswith("unknown") or func == "":
                     data_dict["unk"]["fwd_list"].append(feat)
                 elif "tail" in func:
@@ -341,19 +368,19 @@ def create_one_plot(contig_id):
                 else:
                     data_dict["other"]["rev_list"].append(feat)
 
-    # Plot features per class
+    # add the tracks now
     for key in data_dict.keys():
         cds_track.genomic_features(data_dict[key]["fwd_list"], plotstyle="arrow", r_lim=(75,80), fc=data_dict[key]["col"])
         cds_track.genomic_features(data_dict[key]["rev_list"], plotstyle="arrow", r_lim=(70,75), fc=data_dict[key]["col"])
 
-    # extras (tRNA/others) plotted in black
+    # extras
     extras_col = "black"
     fwd_ex = [f for f in fwd if f.type in ("tRNA","tmRNA")]
     rev_ex = [f for f in rev if f.type in ("tRNA","tmRNA")]
     cds_track.genomic_features(fwd_ex, plotstyle="arrow", r_lim=(75,80), fc=extras_col)
     cds_track.genomic_features(rev_ex, plotstyle="arrow", r_lim=(70,75), fc=extras_col)
 
-    # Prepare labels for CDS (simple truncation / selection based on annotations)
+    # prepare CDS labels
     pos_list = []
     labels = []
     length_list = []
@@ -362,78 +389,65 @@ def create_one_plot(contig_id):
 
     for f in cds_features:
         try:
-            start = int(str(f.location.start))
-            end = int(str(f.location.end))
+            start = int(f.location.start)
+            end = int(f.location.end)
         except Exception:
-            start = 0; end = 0
+            continue
         pos = (start + end) / 2.0
         length = max(1, end - start)
         product = qval(f, "product")
-        fid = qval(f, "ID") or qval(f, "protein_id") or qval(f, "locus_tag")
+        fid = qval(f, "ID") or qval(f, "protein_id") or qval(f, "locus_tag") or ""
         label = product or ""
+        # apply hypothetical rules
         if fid in label_force_list or opts.get("labelHyp"):
-            if len(label) > opts.get("truncate", 20):
+            if len(label) > opts.get("truncate",20):
                 label = label[:opts.get("truncate",20)] + "..."
-            pos_list.append(pos)
-            labels.append(label)
-            length_list.append(length)
-            id_list.append(fid)
+            pos_list.append(pos); labels.append(label); length_list.append(length); id_list.append(fid)
         else:
-            # filter hypotheticals if not requested
             if label == "" or label.lower().startswith("hypothetical") or label.lower().startswith("unknown"):
                 continue
             if len(label) > opts.get("truncate",20):
                 label = label[:opts.get("truncate",20)] + "..."
-            pos_list.append(pos)
-            labels.append(label)
-            length_list.append(length)
-            id_list.append(fid)
+            pos_list.append(pos); labels.append(label); length_list.append(length); id_list.append(fid)
 
-    # Thin out annotations by proportion (annotations in [0,1])
+    # thin annotations by 'annotations' proportion
     ann_prop = float(opts.get("annotations",1.0))
     if ann_prop <= 0:
-        # zero annotations
         pos_list = []; labels = []
-    else:
-        if len(length_list) > 0 and ann_prop < 1.0:
-            # keep top proportion of largest CDS by length
-            k = max(1, int(len(length_list) * ann_prop))
-            # indices of top k lengths
-            idx_sorted = sorted(range(len(length_list)), key=lambda i: -length_list[i])[:k]
-            idx_sorted.sort()
-            pos_list = [pos_list[i] for i in idx_sorted]
-            labels = [labels[i] for i in idx_sorted]
+    elif ann_prop < 1.0 and len(length_list) > 0:
+        k = max(1, int(len(length_list) * ann_prop))
+        idx_sorted = sorted(range(len(length_list)), key=lambda i: -length_list[i])[:k]
+        idx_sorted.sort()
+        pos_list = [pos_list[i] for i in idx_sorted]
+        labels = [labels[i] for i in idx_sorted]
 
-    # Final axis ticks
+    # xticks by interval
     cds_track.xticks_by_interval(interval=int(opts.get("interval",5000)), outer=False, show_bottom_line=False, label_formatter=lambda v: f"{v/1000:.0f} Kb", label_orientation="vertical", line_kws=dict(ec="grey"), label_size=int(opts.get("labelSize",8)))
 
-    # GC content + skew using gbk.calc_* using contig sequence
-    records = list(SeqIO.parse(str(gbk_path), "genbank"))
-    rec_by_id = {rec.id: rec for rec in records}
-    contig_seq = rec_by_id[contig_id].seq
-
-    gc_content_track = sector.add_track((42.5, 60))
-    pos_gc, gc_contents = gbk.calc_gc_content(seq=contig_seq)
-    import numpy as _np
-    gc_contents = gc_contents - float(SeqIO.SeqUtils.GC(contig_seq))  # normalize (SeqUtils.GC returns percent)
+    # compute GC content & skew with sliding windows
+    contig_seq = rec.seq
+    pos_gc, gc_vals = sliding_gc(contig_seq, window=100)
+    # normalize gc to percent difference from mean
+    mean_gc = np.mean(gc_vals) if len(gc_vals)>0 else 0.0
+    gc_vals_rel = gc_vals - mean_gc
     pos_gc = list(pos_gc)
-    positive = _np.where(gc_contents > 0, gc_contents, 0)
-    negative = _np.where(gc_contents < 0, gc_contents, 0)
-    abs_max = _np.max(_np.abs(gc_contents)) if len(gc_contents)>0 else 1
-    gc_content_track.fill_between(pos_gc, positive, 0, vmin=-abs_max, vmax=abs_max, color="black")
-    gc_content_track.fill_between(pos_gc, negative, 0, vmin=-abs_max, vmax=abs_max, color="grey")
+    positive_gc = np.where(gc_vals_rel > 0, gc_vals_rel, 0)
+    negative_gc = np.where(gc_vals_rel < 0, gc_vals_rel, 0)
+    gc_track = sector.add_track((42.5, 60))
+    abs_max_gc = np.max(np.abs(gc_vals_rel)) if len(gc_vals_rel)>0 else 1
+    gc_track.fill_between(pos_gc, positive_gc, 0, vmin=-abs_max_gc, vmax=abs_max_gc, color="black")
+    gc_track.fill_between(pos_gc, negative_gc, 0, vmin=-abs_max_gc, vmax=abs_max_gc, color="grey")
 
-    pos_skew, gc_skew = gbk.calc_gc_skew(seq=contig_seq)
-    gc_skew_track = sector.add_track((25, 42.5))
-    positive_skew = _np.where(gc_skew>0, gc_skew, 0)
-    negative_skew = _np.where(gc_skew<0, gc_skew, 0)
-    abs_max_skew = _np.max(_np.abs(gc_skew)) if len(gc_skew)>0 else 1
-    gc_skew_track.fill_between(list(pos_skew), positive_skew, 0, vmin=-abs_max_skew, vmax=abs_max_skew, color="green")
-    gc_skew_track.fill_between(list(pos_skew), negative_skew, 0, vmin=-abs_max_skew, vmax=abs_max_skew, color="purple")
+    pos_skew, skew_vals = sliding_gc_skew(contig_seq, window=100)
+    pos_skew = list(pos_skew)
+    positive_skew = np.where(skew_vals>0, skew_vals, 0)
+    negative_skew = np.where(skew_vals<0, skew_vals, 0)
+    abs_max_skew = np.max(np.abs(skew_vals)) if len(skew_vals)>0 else 1
+    skew_track = sector.add_track((25, 42.5))
+    skew_track.fill_between(pos_skew, positive_skew, 0, vmin=-abs_max_skew, vmax=abs_max_skew, color="green")
+    skew_track.fill_between(pos_skew, negative_skew, 0, vmin=-abs_max_skew, vmax=abs_max_skew, color="purple")
 
-    # Legends (simplified)
     fig = circos.plotfig()
-    # Save PNG & SVG to tmp files
     out_dir = tmp_dir / opts.get("outputDir","phold_plots")
     out_dir.mkdir(parents=True, exist_ok=True)
     png_path = out_dir / f"{opts.get('prefix','phold')}_{contig_id}.png"
@@ -442,38 +456,32 @@ def create_one_plot(contig_id):
     fig.savefig(str(png_path), dpi=dpi)
     fig.savefig(str(svg_path), format="svg", dpi=dpi)
     plt.close(fig)
-    return str(png_path), str(svg_path)
+    with open(png_path, "rb") as f:
+        pngb = f.read()
+    with open(svg_path, "rb") as f:
+        svgb = f.read()
+    return (str(png_path), pngb, str(svg_path), svgb)
 
-# Decide which contigs to plot
+# decide contigs
 to_plot = seqids if opts.get("allContigs") else seqids[:1]
 
-# collect file bytes to return to JS
-ret = {}
+# collect bytes
+out = {}
 for contig in to_plot:
-    pngp, svgp = create_one_plot(contig)
-    with open(pngp, "rb") as f:
-        png_bytes = f.read()
-    with open(svgp, "rb") as f:
-        svg_bytes = f.read()
-    ret[pngp] = png_bytes
-    ret[svgp] = svg_bytes
+    pngp, pngb, svgp, svgb = create_one_plot(contig)
+    out[pngp] = pngb
+    out[svgp] = svgb
 
-# Convert bytes to js-serializable dict by mapping filename->bytes (Pyodide will expose bytes as a JS Uint8Array)
-ret
+out
         `);
 
-        // 'result' is a Python object (PyProxy) mapping filename->bytes (bytes become Uint8Array in JS)
-        // Convert to JS-friendly mapping
         const pyRet = result.toJs ? result.toJs() : result;
-        // pyRet is an object with keys -> Uint8Array
         for (const [fname, pyBytes] of Object.entries(pyRet)) {
-          // pyBytes may be a typed array already
           const arr = pyBytes instanceof Uint8Array ? pyBytes : new Uint8Array(pyBytes);
           const blobType = fname.endsWith(".svg") ? "image/svg+xml" : "image/png";
           const blob = new Blob([arr], { type: blobType });
           const url = URL.createObjectURL(blob);
 
-          // create UI card
           const card = document.createElement("div");
           card.className = "img-card";
           const title = document.createElement("div");
@@ -494,7 +502,6 @@ ret
 
         statusEl.textContent = "Done. Images displayed below.";
         log("Plotting finished and images loaded.");
-
       } catch (err) {
         console.error(err);
         log("Error running Python: " + String(err));
