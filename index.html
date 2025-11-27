@@ -408,7 +408,10 @@ def create_one_plot(contig_id):
     cds_track.xticks_by_interval(interval=int(opts.get("interval",5000)), outer=False, show_bottom_line=False, label_formatter=lambda v: f"{v/1000:.0f} Kb", label_orientation="vertical", line_kws=dict(ec="grey"), label_size=int(opts.get("labelSize",8)))
 
     # GC content + skew using gbk.calc_* using contig sequence
-    contig_seq = gbk.get_seq_record_by_id(contig_id).seq
+    records = list(SeqIO.parse(str(gbk_path), "genbank"))
+    rec_by_id = {rec.id: rec for rec in records}
+    contig_seq = rec_by_id[contig_id].seq
+
     gc_content_track = sector.add_track((42.5, 60))
     pos_gc, gc_contents = gbk.calc_gc_content(seq=contig_seq)
     import numpy as _np
