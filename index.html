@@ -2,170 +2,512 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>Pyodide Bioinformatics Demo</title>
+  <title>Pyodide phold_plots (browser)</title>
 
-  <!-- Load Pyodide from the official CDN -->
+  <!-- Pyodide -->
   <script src="https://cdn.jsdelivr.net/pyodide/v0.29.0/full/pyodide.js"></script>
 
   <style>
     body {
       font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      max-width: 800px;
-      margin: 2rem auto;
+      max-width: 1100px;
+      margin: 1.75rem auto;
       padding: 0 1rem;
-      line-height: 1.5;
+      line-height: 1.45;
     }
-    textarea {
-      width: 100%;
-      box-sizing: border-box;
-      font-family: monospace;
+    fieldset { margin: .5rem 0 1rem; padding: .75rem; border-radius:6px; }
+    label { display:block; margin: .35rem 0 .15rem; font-weight:600; }
+    input[type="text"], input[type="number"], select {
+      width: 320px; padding: .35rem; border-radius:4px; border:1px solid #ccc;
     }
-    button {
-      margin-top: 0.75rem;
-      padding: 0.5rem 1rem;
-      font-size: 1rem;
-      cursor: pointer;
-    }
-    pre {
-      background: #f5f5f5;
-      padding: 0.75rem;
-      overflow-x: auto;
-      white-space: pre-wrap;
-      word-break: break-word;
-    }
-    .status {
-      font-size: 0.9rem;
-      color: #555;
-      margin-top: 0.25rem;
-    }
+    input[type="file"] { margin-top: .25rem; }
+    .inline { display:inline-block; margin-right:1rem; vertical-align:middle; }
+    button { margin-top: .75rem; padding: 0.5rem 1rem; font-size: 1rem; cursor: pointer; }
+    pre { background: #f5f5f5; padding: 0.75rem; overflow-x:auto; white-space:pre-wrap; }
+    .status { font-size:0.95rem; color:#333; margin-top:.5rem; }
+    .images { display:flex; flex-wrap:wrap; gap:1rem; margin-top:1rem; }
+    .img-card { border:1px solid #ddd; padding:.5rem; border-radius:6px; width:360px;}
+    .img-card img { max-width:100%; height:auto; display:block; }
+    .small { font-size:0.9rem; color:#444; }
   </style>
 </head>
 <body>
-  <h1>Pyodide Bioinformatics Demo</h1>
+  <h1>phold_plots — browser (Pyodide)</h1>
+
   <p>
-    This page runs Python in your browser with Pyodide to do simple DNA sequence analysis:
-    it computes GC content and the reverse complement.
+    Upload a GenBank (.gbk / .gb) file, tweak options and click <strong>Install & Run</strong>.
+    This runs everything client-side using Pyodide (Biopython + pyCirclize + matplotlib).
   </p>
 
-  <label for="sequence"><strong>DNA sequence (A/C/G/T):</strong></label><br />
-  <textarea id="sequence" rows="6">
->Example sequence (you can paste FASTA or raw sequence)
-ATGGCCATTGTAATGGGCCGCTGAAAGGGTGCCCGATAG
-  </textarea>
+  <fieldset>
+    <legend><strong>Input</strong></legend>
+    <label for="fileInput">GenBank file (.gbk, .gb)</label>
+    <input id="fileInput" type="file" accept=".gbk,.gb,.genbank,.gbf,.txt,.fasta" />
+    <div class="small">If your file contains multiple contigs, checking <em>Plot every contig</em> will create one plot per contig.</div>
+  </fieldset>
 
-  <div class="status" id="status">Loading Pyodide…</div>
+  <fieldset>
+    <legend><strong>Plot options (these mirror your click options)</strong></legend>
 
-  <button id="analyzeButton" disabled>Analyze sequence</button>
+    <div class="inline">
+      <label for="prefix">Prefix</label>
+      <input id="prefix" type="text" value="phold" />
+    </div>
 
-  <h2>Results</h2>
-  <pre id="output">(waiting for input)</pre>
+    <div class="inline">
+      <label for="outputDir">Output directory (virtual)</label>
+      <input id="outputDir" type="text" value="phold_plots" />
+    </div>
+
+    <div style="margin-top:.5rem">
+      <label class="inline"><input id="allContigs" type="checkbox" /> Plot every contig</label>
+      <label class="inline"><input id="labelHyp" type="checkbox" /> Label hypothetical proteins</label>
+      <label class="inline"><input id="removeOther" type="checkbox" /> Remove tRNA/tmRNA/CRISPR labels</label>
+    </div>
+
+    <div style="margin-top:.5rem">
+      <label for="plotTitle">Plot title (optional)</label>
+      <input id="plotTitle" type="text" placeholder="(defaults to contig id)" />
+    </div>
+
+    <div style="margin-top:.5rem">
+      <label for="titleSize">Title size</label>
+      <input id="titleSize" type="number" value="20" min="6" />
+      <label style="margin-left:1rem">Label size</label>
+      <input id="labelSize" type="number" value="8" min="4" />
+    </div>
+
+    <div style="margin-top:.5rem">
+      <label for="interval">Axis tick interval (bp)</label>
+      <input id="interval" type="number" value="5000" />
+      <label style="margin-left:1rem">Truncate label chars</label>
+      <input id="truncate" type="number" value="20" />
+    </div>
+
+    <div style="margin-top:.5rem">
+      <label for="dpi">DPI (image quality)</label>
+      <input id="dpi" type="number" value="600" />
+      <label style="margin-left:1rem">Annotations proportion (0-1)</label>
+      <input id="annotations" type="number" min="0" max="1" step="0.05" value="1" />
+    </div>
+
+    <div style="margin-top:.5rem">
+      <label for="labelIds">Label IDs (optional, newline-separated)</label>
+      <textarea id="labelIds" rows="3" style="width:640px; font-family:monospace;" placeholder="Optional list of CDS IDs to always label (one per line)"></textarea>
+    </div>
+  </fieldset>
+
+  <div>
+    <button id="runBtn">Install deps & Run</button>
+    <button id="clearBtn">Clear results</button>
+  </div>
+
+  <div class="status" id="status">Pyodide will be loaded on demand when you click <strong>Install deps & Run</strong>.</div>
+
+  <h2>Logs</h2>
+  <pre id="log" style="height:160px; overflow:auto;">(logs will appear here)</pre>
+
+  <h2>Plots</h2>
+  <div id="images" class="images"></div>
 
   <script type="text/javascript">
-    // Load Pyodide once, globally
-    let pyodideReadyPromise = loadPyodide();
-    
+    let pyodideReadyPromise = null;
+    const runBtn = document.getElementById("runBtn");
+    const clearBtn = document.getElementById("clearBtn");
     const statusEl = document.getElementById("status");
-    const outputEl = document.getElementById("output");
-    const analyzeButton = document.getElementById("analyzeButton");
+    const logEl = document.getElementById("log");
+    const imagesEl = document.getElementById("images");
+    const fileInput = document.getElementById("fileInput");
 
-    async function setupPyodide() {
-      try {
-        const pyodide = await pyodideReadyPromise;
-        const packages = [] // Optionally add packages
-        
-        if (packages.length > 0) {
-          await pyodide.loadPackage("micropip");
-          const micropip = pyodide.pyimport("micropip");
-        
-          await Promise.all(
-            packages.map(pkg => micropip.install(pkg))
-          );
+    function log(msg) {
+      console.log(msg);
+      logEl.textContent += msg + "\n";
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+
+    async function ensurePyodide() {
+      if (!pyodideReadyPromise) {
+        statusEl.textContent = "Loading Pyodide… (this downloads ~ a few MB)";
+        pyodideReadyPromise = loadPyodide({ indexURL: "https://cdn.jsdelivr.net/pyodide/v0.29.0/full/" });
+      }
+      return pyodideReadyPromise;
+    }
+
+    async function installDependencies(pyodide) {
+      // Install micropip then required Python packages
+      statusEl.textContent = "Installing micropip + Biopython + pycirclize + loguru (may take 10-60s)...";
+      log("Installing micropip and packages. This can take a while on first run.");
+
+      // Use runPythonAsync to show progress messages from Python side
+      await pyodide.loadPackage("micropip");
+      const micropip = pyodide.pyimport("micropip");
+      // The package list below can be adjusted if you prefer to omit loguru
+      const packages = ["biopython", "pycirclize", "loguru"];
+
+      for (const pkg of packages) {
+        log(`Installing ${pkg} ...`);
+        try {
+          await micropip.install(pkg);
+          log(`Installed ${pkg}`);
+        } catch (err) {
+          log(`Error installing ${pkg}: ${err}`);
+          // try continue — pycirclize often needs matplotlib/numpy which are pre-provided
         }
-        // Define analysis code once in the Python environment
-        pyodide.runPython(`
-from textwrap import wrap
-
-def gc_content(seq: str):
-    seq = seq.upper()
-    gc = sum(1 for b in seq if b in "GC")
-    at = sum(1 for b in seq if b in "AT")
-    others = len(seq) - gc - at
-    length = len(seq)
-    if length == 0:
-        return 0.0, gc, at, others, length
-    return gc / length * 100.0, gc, at, others, length
-
-def reverse_complement(seq: str) -> str:
-    comp = str.maketrans("ACGTacgt", "TGCAtgca")
-    return seq.translate(comp)[::-1]
-
-def analyze_sequence(raw_seq: str) -> str:
-    # Strip FASTA header if present
-    lines = raw_seq.strip().splitlines()
-    seq_only_lines = [ln for ln in lines if not ln.startswith(">")]
-    seq = "".join(seq_only_lines).replace(" ", "").upper()
-
-    # Keep only A/C/G/T
-    cleaned = "".join(b for b in seq if b in "ACGT")
-
-    gc_pct, gc, at, others, length = gc_content(cleaned)
-    revcomp = reverse_complement(cleaned)
-
-    lines_out = []
-    lines_out.append(f"Original length (including non-ACGT): {len(seq)}")
-    lines_out.append(f"Cleaned length (ACGT only): {length}")
-    lines_out.append(f"GC bases: {gc}")
-    lines_out.append(f"AT bases: {at}")
-    lines_out.append(f"Other discarded characters: {others}")
-    lines_out.append(f"GC content: {gc_pct:.2f}%")
-    lines_out.append("")
-    lines_out.append("Reverse complement:")
-    # Wrap reverse complement to 60 characters per line, FASTA-style
-    if revcomp:
-        lines_out.extend(wrap(revcomp, 60))
-    else:
-        lines_out.append("(empty sequence)")
-    return "\\n".join(lines_out)
-        `);
-
-        statusEl.textContent = "Pyodide ready.";
-        analyzeButton.disabled = false;
-      } catch (err) {
-        console.error(err);
-        statusEl.textContent = "Error loading Pyodide. See console for details.";
       }
+      statusEl.textContent = "Dependencies installed.";
+      log("All requested packages attempted.");
     }
 
-    setupPyodide();
+    // Main button handler
+    runBtn.addEventListener("click", async () => {
+      // Read UI values
+      const file = fileInput.files[0];
+      if (!file) {
+        alert("Please select a GenBank file first.");
+        return;
+      }
 
-    async function analyze() {
-      analyzeButton.disabled = true;
-      statusEl.textContent = "Running analysis…";
+      runBtn.disabled = true;
+      clearBtn.disabled = true;
+      imagesEl.innerHTML = "";
+      logEl.textContent = "";
+
+      const opts = {
+        prefix: document.getElementById("prefix").value || "phold",
+        outputDir: document.getElementById("outputDir").value || "phold_plots",
+        allContigs: document.getElementById("allContigs").checked,
+        labelHyp: document.getElementById("labelHyp").checked,
+        removeOther: document.getElementById("removeOther").checked,
+        plotTitle: document.getElementById("plotTitle").value || null,
+        titleSize: Number(document.getElementById("titleSize").value) || 20,
+        labelSize: Number(document.getElementById("labelSize").value) || 8,
+        interval: Number(document.getElementById("interval").value) || 5000,
+        truncate: Number(document.getElementById("truncate").value) || 20,
+        dpi: Number(document.getElementById("dpi").value) || 600,
+        annotations: Number(document.getElementById("annotations").value) || 1.0,
+        labelIds: (document.getElementById("labelIds").value || "").split(/\r?\n/).map(s => s.trim()).filter(Boolean)
+      };
+
+      // load pyodide & install deps
+      const pyodide = await ensurePyodide();
+      await installDependencies(pyodide);
+
+      // Read the uploaded file as text
+      const fileText = await file.text();
+
+      // Pass file and options into Python and run the plotting function
+      statusEl.textContent = "Running plotting in Pyodide (this may take a while)...";
+      log("Starting Python plotting...");
 
       try {
-        const pyodide = await pyodideReadyPromise;
-        const seq = document.getElementById("sequence").value;
+        // Set JS variables in Python
+        pyodide.globals.set("uploaded_text_js", fileText);
+        pyodide.globals.set("opts_js", opts);
 
-        // Pass the JS string into the Python environment safely
-        pyodide.globals.set("raw_seq_js", seq);
+        // Run the heavy Python logic asynchronously and get back a dictionary
+        const result = await pyodide.runPythonAsync(`
+# --- Python code executed inside Pyodide ---
+import os
+from io import BytesIO, StringIO
+from pathlib import Path
+import json
+# ensure the options passed as a JS object are available
+opts = opts_js.to_py()
 
-        const result = pyodide.runPython(`
-# 'raw_seq_js' is injected from JavaScript
-analyze_sequence(raw_seq_js)
-        `);
+# write uploaded text to a temporary file in the WASM filesystem
+tmp_dir = Path("/tmp/pyodide_phold")
+tmp_dir.mkdir(parents=True, exist_ok=True)
+gbk_path = tmp_dir / "upload.gbk"
+with open(gbk_path, "w", encoding="utf-8") as fh:
+    fh.write(uploaded_text_js)
 
-        outputEl.textContent = result;
-        statusEl.textContent = "Done.";
-      } catch (err) {
-        console.error(err);
-        outputEl.textContent = "Error during analysis:\\n" + err;
-        statusEl.textContent = "Error.";
-      } finally {
-        analyzeButton.disabled = false;
-      }
+# Import required packages
+import micropip
+# (micropip already installed previously)
+# Now import plotting libs
+import numpy as np
+import matplotlib
+matplotlib.use("Agg")  # non-interactive backend for headless render
+import matplotlib.pyplot as plt
+
+# Import Biopython + pycirclize
+from Bio import SeqIO
+from pycirclize import Circos
+from pycirclize.parser import Genbank
+
+# Read the GenBank file using pycirclize Genbank parser
+gbk = Genbank(str(gbk_path))
+
+# Prepare mapping: seqid -> size, features etc
+seqid2size = gbk.get_seqid2size()
+seqids = list(seqid2size.keys())
+
+# Helper: the adapted create_circos_plot using the same logic as your function (trimmed to essentials)
+def create_one_plot(contig_id):
+    seq_len = seqid2size[contig_id]
+    circos = Circos(sectors={contig_id: seq_len})
+    # title
+    title_to_use = opts.get("plotTitle") or contig_id
+    circos.text(title_to_use, size=int(opts.get("titleSize",20)), r=190)
+    sector = circos.get_sector(contig_id)
+
+    cds_track = sector.add_track((70,80))
+    cds_track.axis(fc="#EEEEEE", ec="none")
+
+    # collect features from gbk
+    gb_features = gbk.get_seqid2features(feature_type=None)  # all features
+    features = gb_features.get(contig_id, [])
+
+    # classify forward/rev
+    fwd = [f for f in features if getattr(f.location, "strand", 1) == 1]
+    rev = [f for f in features if getattr(f.location, "strand", 1) == -1]
+    cds_features = [f for f in features if f.type == "CDS"]
+    trna_features = [f for f in features if f.type in ("tRNA",)]
+    tmrna_features = [f for f in features if f.type in ("tmRNA","tm-RNA","tmRNA")]
+    crispr_features = [f for f in features if f.type in ("repeat_region","CRISPR")]
+
+    # Minimal colour mapping similar to your original data_dict
+    data_dict = {
+        "unk": {"col": "#AAAAAA", "fwd_list": [], "rev_list": []},
+        "other": {"col": "#4deeea", "fwd_list": [], "rev_list": []},
+        "tail": {"col": "#74ee15", "fwd_list": [], "rev_list": []},
+        "transcription": {"col": "#ffe700", "fwd_list": [], "rev_list": []},
+        "dna": {"col": "#f000ff", "fwd_list": [], "rev_list": []},
+        "lysis": {"col": "#001eff", "fwd_list": [], "rev_list": []},
+        "moron": {"col": "#8900ff", "fwd_list": [], "rev_list": []},
+        "int": {"col": "#E0B0FF", "fwd_list": [], "rev_list": []},
+        "head": {"col": "#ff008d", "fwd_list": [], "rev_list": []},
+        "con": {"col": "#5A5A5A", "fwd_list": [], "rev_list": []},
+        "acr_defense_vfdb_card": {"col":"#FF0000","fwd_list":[],"rev_list":[]}
     }
 
-    analyzeButton.addEventListener("click", analyze);
+    # Simple classifier (fallbacks) — try to use feature.qualifiers safely
+    def qval(feat, key, idx=0):
+        try:
+            return feat.qualifiers.get(key, [""])[idx]
+        except Exception:
+            return ""
+
+    for feat in fwd:
+        if feat.type == "CDS":
+            phrog = qval(feat, "phrog")
+            func = qval(feat, "function")
+            if any(x in phrog for x in ("vfdb","card","acr","defensefinder")):
+                data_dict["acr_defense_vfdb_card"]["fwd_list"].append(feat)
+            else:
+                # fallback mapping using function string
+                if func.startswith("unknown") or func == "":
+                    data_dict["unk"]["fwd_list"].append(feat)
+                elif "tail" in func:
+                    data_dict["tail"]["fwd_list"].append(feat)
+                elif "transcription" in func:
+                    data_dict["transcription"]["fwd_list"].append(feat)
+                elif "DNA" in func:
+                    data_dict["dna"]["fwd_list"].append(feat)
+                elif "lysis" in func:
+                    data_dict["lysis"]["fwd_list"].append(feat)
+                elif "moron" in func:
+                    data_dict["moron"]["fwd_list"].append(feat)
+                elif "integration" in func:
+                    data_dict["int"]["fwd_list"].append(feat)
+                elif "head" in func:
+                    data_dict["head"]["fwd_list"].append(feat)
+                else:
+                    data_dict["other"]["fwd_list"].append(feat)
+
+    for feat in rev:
+        if feat.type == "CDS":
+            phrog = qval(feat, "phrog")
+            func = qval(feat, "function")
+            if any(x in phrog for x in ("vfdb","card","acr","defensefinder")):
+                data_dict["acr_defense_vfdb_card"]["rev_list"].append(feat)
+            else:
+                if func.startswith("unknown") or func == "":
+                    data_dict["unk"]["rev_list"].append(feat)
+                elif "tail" in func:
+                    data_dict["tail"]["rev_list"].append(feat)
+                elif "transcription" in func:
+                    data_dict["transcription"]["rev_list"].append(feat)
+                elif "DNA" in func:
+                    data_dict["dna"]["rev_list"].append(feat)
+                elif "lysis" in func:
+                    data_dict["lysis"]["rev_list"].append(feat)
+                elif "moron" in func:
+                    data_dict["moron"]["rev_list"].append(feat)
+                elif "integration" in func:
+                    data_dict["int"]["rev_list"].append(feat)
+                elif "head" in func:
+                    data_dict["head"]["rev_list"].append(feat)
+                else:
+                    data_dict["other"]["rev_list"].append(feat)
+
+    # Plot features per class
+    for key in data_dict.keys():
+        cds_track.genomic_features(data_dict[key]["fwd_list"], plotstyle="arrow", r_lim=(75,80), fc=data_dict[key]["col"])
+        cds_track.genomic_features(data_dict[key]["rev_list"], plotstyle="arrow", r_lim=(70,75), fc=data_dict[key]["col"])
+
+    # extras (tRNA/others) plotted in black
+    extras_col = "black"
+    fwd_ex = [f for f in fwd if f.type in ("tRNA","tmRNA")]
+    rev_ex = [f for f in rev if f.type in ("tRNA","tmRNA")]
+    cds_track.genomic_features(fwd_ex, plotstyle="arrow", r_lim=(75,80), fc=extras_col)
+    cds_track.genomic_features(rev_ex, plotstyle="arrow", r_lim=(70,75), fc=extras_col)
+
+    # Prepare labels for CDS (simple truncation / selection based on annotations)
+    pos_list = []
+    labels = []
+    length_list = []
+    id_list = []
+    label_force_list = set(opts.get("labelIds") or [])
+
+    for f in cds_features:
+        try:
+            start = int(str(f.location.start))
+            end = int(str(f.location.end))
+        except Exception:
+            start = 0; end = 0
+        pos = (start + end) / 2.0
+        length = max(1, end - start)
+        product = qval(f, "product")
+        fid = qval(f, "ID") or qval(f, "protein_id") or qval(f, "locus_tag")
+        label = product or ""
+        if fid in label_force_list or opts.get("labelHyp"):
+            if len(label) > opts.get("truncate", 20):
+                label = label[:opts.get("truncate",20)] + "..."
+            pos_list.append(pos)
+            labels.append(label)
+            length_list.append(length)
+            id_list.append(fid)
+        else:
+            # filter hypotheticals if not requested
+            if label == "" or label.lower().startswith("hypothetical") or label.lower().startswith("unknown"):
+                continue
+            if len(label) > opts.get("truncate",20):
+                label = label[:opts.get("truncate",20)] + "..."
+            pos_list.append(pos)
+            labels.append(label)
+            length_list.append(length)
+            id_list.append(fid)
+
+    # Thin out annotations by proportion (annotations in [0,1])
+    ann_prop = float(opts.get("annotations",1.0))
+    if ann_prop <= 0:
+        # zero annotations
+        pos_list = []; labels = []
+    else:
+        if len(length_list) > 0 and ann_prop < 1.0:
+            # keep top proportion of largest CDS by length
+            k = max(1, int(len(length_list) * ann_prop))
+            # indices of top k lengths
+            idx_sorted = sorted(range(len(length_list)), key=lambda i: -length_list[i])[:k]
+            idx_sorted.sort()
+            pos_list = [pos_list[i] for i in idx_sorted]
+            labels = [labels[i] for i in idx_sorted]
+
+    # Final axis ticks
+    cds_track.xticks_by_interval(interval=int(opts.get("interval",5000)), outer=False, show_bottom_line=False, label_formatter=lambda v: f"{v/1000:.0f} Kb", label_orientation="vertical", line_kws=dict(ec="grey"), label_size=int(opts.get("labelSize",8)))
+
+    # GC content + skew using gbk.calc_* using contig sequence
+    contig_seq = gbk.get_seq_record_by_id(contig_id).seq
+    gc_content_track = sector.add_track((42.5, 60))
+    pos_gc, gc_contents = gbk.calc_gc_content(seq=contig_seq)
+    import numpy as _np
+    gc_contents = gc_contents - float(SeqIO.SeqUtils.GC(contig_seq))  # normalize (SeqUtils.GC returns percent)
+    pos_gc = list(pos_gc)
+    positive = _np.where(gc_contents > 0, gc_contents, 0)
+    negative = _np.where(gc_contents < 0, gc_contents, 0)
+    abs_max = _np.max(_np.abs(gc_contents)) if len(gc_contents)>0 else 1
+    gc_content_track.fill_between(pos_gc, positive, 0, vmin=-abs_max, vmax=abs_max, color="black")
+    gc_content_track.fill_between(pos_gc, negative, 0, vmin=-abs_max, vmax=abs_max, color="grey")
+
+    pos_skew, gc_skew = gbk.calc_gc_skew(seq=contig_seq)
+    gc_skew_track = sector.add_track((25, 42.5))
+    positive_skew = _np.where(gc_skew>0, gc_skew, 0)
+    negative_skew = _np.where(gc_skew<0, gc_skew, 0)
+    abs_max_skew = _np.max(_np.abs(gc_skew)) if len(gc_skew)>0 else 1
+    gc_skew_track.fill_between(list(pos_skew), positive_skew, 0, vmin=-abs_max_skew, vmax=abs_max_skew, color="green")
+    gc_skew_track.fill_between(list(pos_skew), negative_skew, 0, vmin=-abs_max_skew, vmax=abs_max_skew, color="purple")
+
+    # Legends (simplified)
+    fig = circos.plotfig()
+    # Save PNG & SVG to tmp files
+    out_dir = tmp_dir / opts.get("outputDir","phold_plots")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    png_path = out_dir / f"{opts.get('prefix','phold')}_{contig_id}.png"
+    svg_path = out_dir / f"{opts.get('prefix','phold')}_{contig_id}.svg"
+    dpi = int(opts.get("dpi",600))
+    fig.savefig(str(png_path), dpi=dpi)
+    fig.savefig(str(svg_path), format="svg", dpi=dpi)
+    plt.close(fig)
+    return str(png_path), str(svg_path)
+
+# Decide which contigs to plot
+to_plot = seqids if opts.get("allContigs") else seqids[:1]
+
+# collect file bytes to return to JS
+ret = {}
+for contig in to_plot:
+    pngp, svgp = create_one_plot(contig)
+    with open(pngp, "rb") as f:
+        png_bytes = f.read()
+    with open(svgp, "rb") as f:
+        svg_bytes = f.read()
+    ret[pngp] = png_bytes
+    ret[svgp] = svg_bytes
+
+# Convert bytes to js-serializable dict by mapping filename->bytes (Pyodide will expose bytes as a JS Uint8Array)
+ret
+        `);
+
+        // 'result' is a Python object (PyProxy) mapping filename->bytes (bytes become Uint8Array in JS)
+        // Convert to JS-friendly mapping
+        const pyRet = result.toJs ? result.toJs() : result;
+        // pyRet is an object with keys -> Uint8Array
+        for (const [fname, pyBytes] of Object.entries(pyRet)) {
+          // pyBytes may be a typed array already
+          const arr = pyBytes instanceof Uint8Array ? pyBytes : new Uint8Array(pyBytes);
+          const blobType = fname.endsWith(".svg") ? "image/svg+xml" : "image/png";
+          const blob = new Blob([arr], { type: blobType });
+          const url = URL.createObjectURL(blob);
+
+          // create UI card
+          const card = document.createElement("div");
+          card.className = "img-card";
+          const title = document.createElement("div");
+          title.innerHTML = `<strong>${fname.split("/").pop()}</strong>`;
+          const img = document.createElement("img");
+          img.src = url;
+          const dlLink = document.createElement("a");
+          dlLink.href = url;
+          dlLink.download = fname.split("/").pop();
+          dlLink.textContent = "Download";
+          dlLink.style.display = "inline-block";
+          dlLink.style.marginTop = ".5rem";
+          card.appendChild(title);
+          card.appendChild(img);
+          card.appendChild(dlLink);
+          imagesEl.appendChild(card);
+        }
+
+        statusEl.textContent = "Done. Images displayed below.";
+        log("Plotting finished and images loaded.");
+
+      } catch (err) {
+        console.error(err);
+        log("Error running Python: " + String(err));
+        statusEl.textContent = "Error (see logs)";
+      } finally {
+        runBtn.disabled = false;
+        clearBtn.disabled = false;
+      }
+    });
+
+    clearBtn.addEventListener("click", () => {
+      imagesEl.innerHTML = "";
+      logEl.textContent = "";
+      statusEl.textContent = "Cleared.";
+    });
+
   </script>
 </body>
 </html>
