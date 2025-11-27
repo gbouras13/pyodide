@@ -95,6 +95,19 @@
       <label for="labelIds">Label IDs (optional, newline-separated)</label>
       <textarea id="labelIds" rows="3" style="width:640px; font-family:monospace;" placeholder="Optional list of CDS IDs to always label (one per line)"></textarea>
     </div>
+
+    <!-- NEW: output format selection -->
+    <div style="margin-top:.5rem">
+      <label><strong>Output format</strong></label>
+      <label class="inline">
+        <input id="fmtPng" type="checkbox" checked /> PNG (.png)
+      </label>
+      <label class="inline" style="margin-left:1rem;">
+        <input id="fmtSvg" type="checkbox" /> SVG (.svg)
+      </label>
+      <div class="small">Choose one or both. If both are selected you'll get PNG + SVG (current behaviour).</div>
+    </div>
+
   </fieldset>
 
   <div>
@@ -177,7 +190,10 @@
         truncate: Number(document.getElementById("truncate").value) || 20,
         dpi: Number(document.getElementById("dpi").value) || 600,
         annotations: Number(document.getElementById("annotations").value) || 1.0,
-        labelIds: (document.getElementById("labelIds").value || "").split(/\r?\n/).map(s => s.trim()).filter(Boolean)
+        labelIds: (document.getElementById("labelIds").value || "").split(/\r?\n/).map(s => s.trim()).filter(Boolean),
+        // new format flags
+        fmtPng: document.getElementById("fmtPng").checked,
+        fmtSvg: document.getElementById("fmtSvg").checked
       };
 
       const pyodide = await ensurePyodide();
@@ -436,8 +452,6 @@ def create_one_plot(contig_id):
         line_kws=dict(ec="grey") 
     )
 
-
-
     # compute GC content & skew with sliding windows
     contig_seq = rec.seq
     pos_gc, gc_vals = sliding_gc(contig_seq, window=100)
@@ -490,7 +504,7 @@ def create_one_plot(contig_id):
         fontsize=9,
         handlelength=1.8,
         frameon=False,
-        bbox_to_anchor=(0.10, 1.38),
+        bbox_to_anchor=(0.00, 1.38),
         loc="upper left",
     )
     
@@ -498,7 +512,6 @@ def create_one_plot(contig_id):
     phrog_legend.get_title().set_ha("left")
 
     circos.ax.add_artist(phrog_legend)
-
 
     ################################
     # GC content / GC skew legend
@@ -541,20 +554,29 @@ def create_one_plot(contig_id):
 
     circos.ax.add_artist(gc_legend)
 
-
     out_dir = tmp_dir / opts.get("outputDir","phold_plots")
     out_dir.mkdir(parents=True, exist_ok=True)
     png_path = out_dir / f"{opts.get('prefix','phold')}_{contig_id}.png"
     svg_path = out_dir / f"{opts.get('prefix','phold')}_{contig_id}.svg"
     dpi = int(opts.get("dpi",600))
-    fig.savefig(str(png_path), dpi=dpi)
-    fig.savefig(str(svg_path), format="svg", dpi=dpi)
+
+    # Save only the requested formats (but saving both still safe if both requested).
+    if opts.get("fmtPng", True):
+        fig.savefig(str(png_path), dpi=dpi)
+    if opts.get("fmtSvg", False):
+        fig.savefig(str(svg_path), format="svg", dpi=dpi)
+
     plt.close(fig)
-    with open(png_path, "rb") as f:
-        pngb = f.read()
-    with open(svg_path, "rb") as f:
-        svgb = f.read()
-    return (str(png_path), pngb, str(svg_path), svgb)
+
+    out_map = {}
+    if opts.get("fmtPng", True) and png_path.exists():
+        with open(png_path, "rb") as f:
+            out_map[str(png_path)] = f.read()
+    if opts.get("fmtSvg", False) and svg_path.exists():
+        with open(svg_path, "rb") as f:
+            out_map[str(svg_path)] = f.read()
+
+    return out_map
 
 # decide contigs
 to_plot = seqids if opts.get("allContigs") else seqids[:1]
@@ -562,14 +584,16 @@ to_plot = seqids if opts.get("allContigs") else seqids[:1]
 # collect bytes
 out = {}
 for contig in to_plot:
-    pngp, pngb, svgp, svgb = create_one_plot(contig)
-    out[pngp] = pngb
-    out[svgp] = svgb
+    contig_out_map = create_one_plot(contig)
+    # contig_out_map is a dict mapping filepath -> bytes for requested formats
+    for k,v in contig_out_map.items():
+        out[k] = v
 
 out
         `);
 
         const pyRet = result.toJs ? result.toJs() : result;
+        // pyRet is an object mapping filenames -> byte arrays
         for (const [fname, pyBytes] of Object.entries(pyRet)) {
           const arr = pyBytes instanceof Uint8Array ? pyBytes : new Uint8Array(pyBytes);
           const blobType = fname.endsWith(".svg") ? "image/svg+xml" : "image/png";
