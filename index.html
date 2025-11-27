@@ -503,8 +503,9 @@ def create_one_plot(contig_id):
     phrog_legend = circos.ax.legend(
         handles=handle_phrogs,
         title="PHROG CDS",
-        fontsize=8,
-        handlelength=1.7,
+        fontsize=7,
+        title_fontsize=8,
+        handlelength=1.3,
         frameon=False,
         bbox_to_anchor=(-0.08, 1.49),
         loc="upper left",
@@ -547,9 +548,10 @@ def create_one_plot(contig_id):
     gc_legend = circos.ax.legend(
         handles=combined_handles,
         title="Other Features",
-        fontsize=8,
+        fontsize=7,
+        title_fontsize=8,
+        handlelength=1.2,
         frameon=False,
-        handlelength=1.5,
         bbox_to_anchor=(0.73, 1.49),
         loc="upper left",
     )
