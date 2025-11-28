@@ -439,7 +439,7 @@ def create_one_plot(contig_id):
         labels = [labels[i] for i in idx_sorted]
 
     # xticks by interval
-    cds_track.xticks_by_interval(interval=int(opts.get("interval",5000)), outer=False, show_bottom_line=False, label_formatter=lambda v: f"{v/1000:.0f} Kb", label_orientation="vertical", line_kws=dict(ec="grey"), label_size=int(opts.get("labelSize",8)))
+    cds_track.xticks_by_interval(interval=int(opts.get("interval",5000)), outer=False, show_bottom_line=False, label_formatter=lambda v: f"{v/1000:.0f} Kb", label_orientation="vertical", line_kws=dict(ec="grey"), label_size=int(opts.get("labelSize",6)))
 
     # Plot CDS product labels on outer position
     cds_track.xticks(
