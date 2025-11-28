@@ -35,10 +35,11 @@
   <h1>phold plot web assembly app</h1>
 
   <p>
-    Upload a GenBank (.gbk / .gb) file, tweak options and click <strong>Install & Run</strong>.
-    This runs <strong>phold plot</strong> client-side using Wasm (WebAssembly) with Pyodide (Biopython + pyCirclize + matplotlib).
-    No data leaves your machine.
+    Upload a GenBank (.gbk / .gb) file, tweak options and click <strong>Run</strong>.
+    This runs <strong>phold plot</strong>.
     See the phold main repository for more details at <a href="https://github.com/gbouras13/phold" target="_blank">GitHub</a>.
+    <strong>phold plot</strong> is run client-side using Wasm (WebAssembly) with Pyodide (Biopython + pyCirclize + matplotlib).
+    No data leaves your machine.
   </p>
 
   <fieldset>
@@ -54,11 +55,6 @@
     <div class="inline">
       <label for="prefix">Prefix</label>
       <input id="prefix" type="text" value="phold" />
-    </div>
-
-    <div class="inline">
-      <label for="outputDir">Output directory (virtual)</label>
-      <input id="outputDir" type="text" value="phold_plots" />
     </div>
 
     <div style="margin-top:.5rem">
@@ -113,11 +109,11 @@
   </fieldset>
 
   <div>
-    <button id="runBtn">Install deps & Run</button>
+    <button id="runBtn">Run</button>
     <button id="clearBtn">Clear results</button>
   </div>
 
-  <div class="status" id="status">Pyodide will be loaded on demand when you click <strong>Install deps & Run</strong>.</div>
+  <div class="status" id="status">Pyodide will be loaded on demand when you click <strong>Run</strong>.</div>
 
   <h2>Logs</h2>
   <pre id="log" style="height:160px; overflow:auto;">(logs will appear here)</pre>
